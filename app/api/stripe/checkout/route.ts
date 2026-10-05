@@ -1,159 +1,260 @@
 import { Plan } from "@prisma/client";
 import { requireAuth } from "@/lib/auth-guard";
 import { db } from "@/lib/db";
-import { STRIPE_PRICE_IDS, stripeClient } from "@/lib/stripe";
+import {
+  STRIPE_PRICE_IDS,
+  getAppUrl,
+  getCustomerId,
+  getStripeClient,
+  isKnownPriceId,
+} from "@/lib/stripe";
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 
+type CheckoutBody = {
+  priceId?: unknown;
+};
+
+function error(message: string, status: number, code?: string) {
+  return NextResponse.json(
+    { error: message, ...(code ? { code } : {}) },
+    { status },
+  );
+}
+
+/** 8 random lowercase letters for Stripe's integration_identifier. */
+function randomSuffix(): string {
+  const letters = "abcdefghijklmnopqrstuvwxyz";
+  let out = "";
+  const bytes = new Uint8Array(8);
+  crypto.getRandomValues(bytes);
+  for (const b of bytes) out += letters[b % letters.length];
+  return out;
+}
+
 export async function POST(request: NextRequest) {
+  let session;
   try {
-    const session = await requireAuth(request);
+    session = await requireAuth(request);
+  } catch {
+    return error("Unauthorized", 401, "UNAUTHORIZED");
+  }
 
-    const { priceId } = await request.json();
+  // Malformed JSON body.
+  let body: CheckoutBody;
+  try {
+    body = (await request.json()) as CheckoutBody;
+  } catch {
+    return error("Invalid request body.", 400, "INVALID_BODY");
+  }
 
-    if (!priceId) {
-      return NextResponse.json(
-        { error: "Price ID is required" },
-        { status: 400 },
-      );
-    }
+  // Whitelist the price id — never trust a raw client-supplied Stripe id.
+  const priceKey =
+    typeof body.priceId === "string" ? body.priceId : null;
+  if (!priceKey) {
+    return error("Price ID is required.", 400, "PRICE_REQUIRED");
+  }
+  const stripePriceId =
+    STRIPE_PRICE_IDS[priceKey as keyof typeof STRIPE_PRICE_IDS];
+  if (!stripePriceId || !isKnownPriceId(stripePriceId)) {
+    return error("Invalid price ID.", 400, "INVALID_PRICE");
+  }
 
-    const stripePriceId =
-      STRIPE_PRICE_IDS[priceId as keyof typeof STRIPE_PRICE_IDS];
+  const appUrl = getAppUrl();
+  let stripe;
+  try {
+    stripe = getStripeClient();
+  } catch (err) {
+    console.error("Stripe misconfigured:", err);
+    return error("Payments are not configured.", 500, "STRIPE_MISCONFIGURED");
+  }
 
-    if (!stripePriceId) {
-      return NextResponse.json(
-        { error: "Invalid price ID" },
-        { status: 400 },
-      );
-    }
+  const user = await db.user.findUnique({
+    where: { id: session.user.id },
+  });
+  if (!user) return error("User not found.", 404, "USER_NOT_FOUND");
+  if (!user.email) {
+    return error(
+      "Your account has no email address. Add one before subscribing.",
+      400,
+      "EMAIL_REQUIRED",
+    );
+  }
 
-    const user = await db.user.findUnique({
-      where: {
-        id: session.user.id,
-      },
-    });
-
-    if (!user) {
-      return NextResponse.json(
-        { error: "User not found" },
-        { status: 404 },
-      );
-    }
-
-    if (!user.email) {
-      return NextResponse.json(
-        { error: "User email not found" },
-        { status: 400 },
-      );
-    }
-
-    if (user.plan === Plan.PREMIUM) {
-      return NextResponse.json(
-        { error: "You already have an active subscription." },
-        { status: 400 },
-      );
-    }
-
+  try {
+    // Resolve (or recover) the Stripe customer. A stored id may be stale
+    // if the customer was deleted in the Stripe dashboard.
     let customerId = user.stripeCustomerId;
+    if (customerId) {
+      try {
+        const existing = await stripe.customers.retrieve(customerId);
+        if (existing.deleted) {
+          customerId = null;
+        } else if (
+          typeof existing !== "string" &&
+          existing.email !== user.email
+        ) {
+          // Keep Stripe in sync when the user changed their email.
+          await stripe.customers.update(customerId, { email: user.email });
+        }
+      } catch (err) {
+        if (
+          err instanceof Stripe.errors.StripeError &&
+          err.code === "resource_missing"
+        ) {
+          customerId = null;
+        } else {
+          throw err;
+        }
+      }
+    }
 
     if (!customerId) {
-      const customer = await stripeClient.customers.create({
+      const customer = await stripe.customers.create({
         email: user.email,
-        metadata: {
-          userId: user.id,
-        },
+        metadata: { userId: user.id },
       });
-
       customerId = customer.id;
-
       await db.user.update({
-        where: {
-          id: user.id,
-        },
-        data: {
-          stripeCustomerId: customerId,
-        },
+        where: { id: user.id },
+        data: { stripeCustomerId: customerId },
       });
     }
 
-    const checkoutSession = await stripeClient.checkout.sessions.create({
-      customer: customerId,
-      mode: "subscription",
-      payment_method_types: ["card"],
-      client_reference_id: user.id,
+    // If we already track a subscription, check its live status so a stale
+    // DB row can't permanently block re-subscribing (e.g. webhook delayed
+    // or missed). Only an actually-active subscription blocks checkout.
+    if (user.stripeSubscriptionId) {
+      try {
+        const current = await stripe.subscriptions.retrieve(
+          user.stripeSubscriptionId,
+        );
+        if (
+          (current.status === "active" || current.status === "trialing") &&
+          getCustomerId(current.customer) === customerId
+        ) {
+          return error(
+            "You already have an active subscription. Manage it from billing.",
+            409,
+            "ALREADY_SUBSCRIBED",
+          );
+        }
+        // Stale row: Stripe says it's over. Heal the local record so the
+        // user can subscribe again instead of being stuck.
+        if (
+          current.status === "canceled" ||
+          current.status === "incomplete_expired" ||
+          current.status === "unpaid"
+        ) {
+          await db.user.update({
+            where: { id: user.id },
+            data: {
+              plan: Plan.FREE,
+              stripeSubscriptionId: null,
+              stripePriceId: null,
+              stripeCurrentPeriodEnd: null,
+            },
+          });
+        }
+      } catch (err) {
+        // Deleted on Stripe's side — clear the reference and continue.
+        if (
+          err instanceof Stripe.errors.StripeError &&
+          err.code === "resource_missing"
+        ) {
+          await db.user.update({
+            where: { id: user.id },
+            data: {
+              plan: Plan.FREE,
+              stripeSubscriptionId: null,
+              stripePriceId: null,
+              stripeCurrentPeriodEnd: null,
+            },
+          });
+        } else {
+          throw err;
+        }
+      }
+    } else if (user.plan === Plan.PREMIUM) {
+      // No subscription id but flag says premium — inconsistent state.
+      // Heal it rather than dead-ending the user.
+      await db.user.update({
+        where: { id: user.id },
+        data: { plan: Plan.FREE },
+      });
+    }
 
-      line_items: [
-        {
-          price: stripePriceId,
-          quantity: 1,
-        },
-      ],
+    // Idempotency: double-clicks / retries within 24h reuse one session.
+    const idempotencyKey = `checkout:${user.id}:${stripePriceId}:${Math.floor(
+      Date.now() / (24 * 60 * 60 * 1000),
+    )}`;
 
-      subscription_data: {
-        metadata: {
-          userId: user.id,
-          priceId: stripePriceId,
+    const checkoutSession = await stripe.checkout.sessions.create(
+      {
+        customer: customerId,
+        mode: "subscription",
+        // Never set payment_method_types: omitting it enables Stripe's
+        // dynamic payment methods (best conversion, managed from Dashboard).
+        // https://docs.stripe.com/payments/payment-methods/dynamic-payment-methods.md
+        client_reference_id: user.id,
+        integration_identifier: `better-auth-billing-${randomSuffix()}`,
+        customer_update: { address: "auto" },
+        billing_address_collection: "auto",
+        allow_promotion_codes: true,
+        line_items: [{ price: stripePriceId, quantity: 1 }],
+        subscription_data: {
+          metadata: { userId: user.id, priceId: stripePriceId },
         },
+        metadata: { userId: user.id, priceId: stripePriceId },
+        success_url: `${appUrl}/billing/success?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${appUrl}/pricing?canceled=1`,
       },
+      { idempotencyKey },
+    );
 
-      metadata: {
-        userId: user.id,
-        priceId: stripePriceId,
-      },
-
-      success_url: `${process.env.NEXT_PUBLIC_APP_URL}/billing/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/pricing`,
-
-      expand: ["subscription"]
-    });
-
-    return NextResponse.json({
-      url: checkoutSession.url,
-    });
-  } catch (error) {
-    console.error("Stripe Checkout Error:", error);
-
-    if (error instanceof Stripe.errors.StripeError) {
-      return NextResponse.json(
-        {
-          error: error.message,
-        },
-        {
-          status: error.statusCode ?? 500,
-        },
+    if (!checkoutSession.url) {
+      return error(
+        "Could not create a checkout session. Try again.",
+        502,
+        "NO_CHECKOUT_URL",
       );
     }
 
-    if (error instanceof Error) {
-      if (error.message === "UNAUTHORIZED") {
-        return NextResponse.json(
-          {
-            error: "Unauthorized",
-          },
-          {
-            status: 401,
-          },
+    return NextResponse.json({ url: checkoutSession.url });
+  } catch (err) {
+    console.error("Stripe Checkout Error:", err);
+
+    if (err instanceof Stripe.errors.StripeError) {
+      if (err.type === "StripeCardError") {
+        return error(err.message, 402, "CARD_ERROR");
+      }
+      if (err.type === "StripeRateLimitError") {
+        return error(
+          "Too many requests. Try again in a moment.",
+          503,
+          "RATE_LIMITED",
         );
       }
-
-      return NextResponse.json(
-        {
-          error: error.message,
-        },
-        {
-          status: 500,
-        },
-      );
+      if (err.type === "StripeInvalidRequestError") {
+        return error(
+          "Invalid payment request. Contact support if this persists.",
+          400,
+          "INVALID_REQUEST",
+        );
+      }
+      if (
+        err.type === "StripeConnectionError" ||
+        err.type === "StripeAPIError"
+      ) {
+        return error(
+          "Payment provider is unavailable. Try again shortly.",
+          502,
+          "PROVIDER_UNAVAILABLE",
+        );
+      }
+      return error(err.message, err.statusCode ?? 500, "STRIPE_ERROR");
     }
 
-    return NextResponse.json(
-      {
-        error: "Internal Server Error",
-      },
-      {
-        status: 500,
-      },
-    );
+    return error("Internal Server Error", 500, "INTERNAL_ERROR");
   }
 }
