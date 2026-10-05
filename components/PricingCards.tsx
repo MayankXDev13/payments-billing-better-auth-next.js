@@ -61,8 +61,14 @@ function Cards({ tiers }: PricingCardsProps) {
         window.location.assign("/login");
         return;
       }
-      if (data.code === "ALREADY_SUBSCRIBED") {
+      if (
+        data.code === "ALREADY_SUBSCRIBED" ||
+        data.code === "SUBSCRIPTION_ATTENTION"
+      ) {
         setAlreadySubscribed(true);
+        if (data.code === "SUBSCRIPTION_ATTENTION" && data.error) {
+          setError(data.error);
+        }
         return;
       }
       setError(data.error ?? "Failed to create checkout session.");

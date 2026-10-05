@@ -3,12 +3,14 @@ import { requireAuth } from "@/lib/auth-guard";
 import { db } from "@/lib/db";
 import {
   STRIPE_PRICE_IDS,
+  decideAccessForStatus,
   getAppUrl,
   getCustomerId,
   getStripeClient,
   isKnownPriceId,
 } from "@/lib/stripe";
 import { NextRequest, NextResponse } from "next/server";
+import { randomUUID } from "crypto";
 import Stripe from "stripe";
 
 type CheckoutBody = {
@@ -123,29 +125,35 @@ export async function POST(request: NextRequest) {
 
     // If we already track a subscription, check its live status so a stale
     // DB row can't permanently block re-subscribing (e.g. webhook delayed
-    // or missed). Only an actually-active subscription blocks checkout.
+    // or missed). Anything but a terminal state blocks a second checkout —
+    // the user should fix the existing subscription via the portal.
     if (user.stripeSubscriptionId) {
       try {
         const current = await stripe.subscriptions.retrieve(
           user.stripeSubscriptionId,
         );
-        if (
-          (current.status === "active" || current.status === "trialing") &&
-          getCustomerId(current.customer) === customerId
-        ) {
-          return error(
-            "You already have an active subscription. Manage it from billing.",
-            409,
-            "ALREADY_SUBSCRIBED",
-          );
-        }
-        // Stale row: Stripe says it's over. Heal the local record so the
-        // user can subscribe again instead of being stuck.
-        if (
-          current.status === "canceled" ||
-          current.status === "incomplete_expired" ||
-          current.status === "unpaid"
-        ) {
+        if (getCustomerId(current.customer) !== customerId) {
+          // Subscription belongs to a different (orphaned) customer record;
+          // fall through and let checkout create a fresh subscription.
+        } else {
+          const decision = decideAccessForStatus(current.status);
+          if (decision === "grant") {
+            return error(
+              "You already have an active subscription. Manage it from billing.",
+              409,
+              "ALREADY_SUBSCRIBED",
+            );
+          }
+          if (decision === "keep") {
+            return error(
+              `Your subscription needs attention (${current.status}). ` +
+                `Manage it from billing instead of starting a new one.`,
+              409,
+              "SUBSCRIPTION_ATTENTION",
+            );
+          }
+          // Terminal state: Stripe says it's over. Heal the local record so
+          // the user can subscribe again instead of being stuck.
           await db.user.update({
             where: { id: user.id },
             data: {
@@ -184,10 +192,11 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Idempotency: double-clicks / retries within 24h reuse one session.
-    const idempotencyKey = `checkout:${user.id}:${stripePriceId}:${Math.floor(
-      Date.now() / (24 * 60 * 60 * 1000),
-    )}`;
+    // Idempotency: one key per attempt. Checkout sessions are single-use
+    // and expire, so a day-bucketed key would replay stale URLs — generate
+    // a fresh key so every checkout attempt gets a usable session.
+    // (Double-clicks are already suppressed client-side via the pending state.)
+    const idempotencyKey = `checkout:${user.id}:${stripePriceId}:${randomUUID()}`;
 
     const checkoutSession = await stripe.checkout.sessions.create(
       {

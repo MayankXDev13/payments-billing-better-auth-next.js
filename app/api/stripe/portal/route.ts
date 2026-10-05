@@ -85,7 +85,12 @@ export async function POST(request: NextRequest) {
         "CUSTOMER_DELETED",
       );
     }
-    throw err;
+    console.error("Stripe customer lookup failed:", err);
+    return error(
+      "Payment provider is unavailable. Try again shortly.",
+      502,
+      "PROVIDER_UNAVAILABLE",
+    );
   }
 
   try {
