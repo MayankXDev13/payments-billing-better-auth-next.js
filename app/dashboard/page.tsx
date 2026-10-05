@@ -1,4 +1,5 @@
 import { ManageBillingButton } from "@/components/ManageBillingButton";
+import { SiteHeader } from "@/components/SiteHeader";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { getStripeClient, getSubscriptionPeriodEnd } from "@/lib/stripe";
@@ -37,60 +38,93 @@ export default async function DashboardPage() {
   const isPremium = user.plan === "PREMIUM";
 
   return (
-    <div className="min-h-screen bg-neutral-950 px-6 py-20 text-white">
-      <div className="mx-auto max-w-3xl">
-        <h1 className="text-4xl font-bold">Dashboard</h1>
-        <p className="mt-2 text-neutral-400">
-          Signed in as {user.name} ({user.email})
-        </p>
+    <div className="min-h-screen bg-[#09090b] text-neutral-200">
+      <SiteHeader />
+      <main className="mx-auto max-w-3xl px-6 py-16">
+        <div className="rise">
+          <p className="font-mono text-xs tracking-[0.25em] text-orange-400/90">
+            ACCOUNT LEDGER
+          </p>
+          <h1 className="mt-4 font-display text-5xl text-[#F5F1E8]">
+            Hi, <em>{user.name?.split(" ")[0] ?? "there"}</em>.
+          </h1>
+          <p className="mt-3 font-mono text-sm text-neutral-500">
+            {user.email}
+          </p>
+        </div>
 
-        <div className="mt-8 rounded-3xl border border-neutral-800 bg-neutral-900 p-8">
-          <div className="flex items-center justify-between">
-            <h2 className="text-xl font-semibold">Subscription</h2>
+        <section
+          className="rise mt-10 rounded-3xl border border-white/8 bg-[#131316] p-8"
+          style={{ animationDelay: "120ms" }}
+        >
+          <div className="flex items-baseline justify-between">
+            <p className="font-mono text-[11px] tracking-[0.25em] text-neutral-500">
+              CURRENT PLAN
+            </p>
             <span
-              className={`rounded-full px-4 py-1 text-sm font-medium ${
+              className={`rounded-full px-4 py-1 font-mono text-xs tracking-widest ${
                 isPremium
-                  ? "bg-orange-500/10 text-orange-400"
-                  : "bg-neutral-800 text-neutral-300"
+                  ? "bg-orange-500/10 text-orange-300"
+                  : "bg-white/5 text-neutral-400"
               }`}
             >
               {user.plan}
             </span>
           </div>
 
+          <p className="mt-4 font-display text-4xl italic text-[#F5F1E8]">
+            {isPremium ? "Premium" : "Free"}
+          </p>
+
+          <div className="my-6 h-px bg-white/8" />
+
           {isPremium ? (
-            <div className="mt-4 space-y-1 text-sm text-neutral-400">
-              {status ? <p>Status: {status}</p> : null}
-              {periodEnd ? (
-                <p>
-                  Renews:{" "}
-                  {periodEnd.toLocaleDateString(undefined, {
-                    year: "numeric",
-                    month: "long",
-                    day: "numeric",
-                  })}
+            <dl className="space-y-4 text-sm">
+              {status && (
+                <div className="flex justify-between">
+                  <dt className="font-mono text-xs tracking-widest text-neutral-500">
+                    STATUS
+                  </dt>
+                  <dd className="font-mono tabular-nums text-neutral-200">
+                    {status}
+                  </dd>
+                </div>
+              )}
+              {periodEnd && (
+                <div className="flex justify-between">
+                  <dt className="font-mono text-xs tracking-widest text-neutral-500">
+                    {cancelAtPeriodEnd ? "ENDS" : "RENEWS"}
+                  </dt>
+                  <dd className="font-mono tabular-nums text-neutral-200">
+                    {periodEnd.toLocaleDateString(undefined, {
+                      year: "numeric",
+                      month: "short",
+                      day: "numeric",
+                    })}
+                  </dd>
+                </div>
+              )}
+              {cancelAtPeriodEnd && (
+                <p className="rounded-xl border border-yellow-500/30 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-200">
+                  Cancels at the end of the billing period. Resubscribe from
+                  billing to stay on Premium.
                 </p>
-              ) : null}
-              {cancelAtPeriodEnd ? (
-                <p className="text-yellow-400">
-                  Cancels at the end of the billing period.
-                </p>
-              ) : null}
-            </div>
+              )}
+            </dl>
           ) : (
-            <p className="mt-4 text-sm text-neutral-400">
-              You&apos;re on the Free plan. Upgrade for unlimited usage and
-              priority support.
+            <p className="text-[15px] leading-relaxed text-neutral-400">
+              Free covers the basics. Premium removes the limits for $10 a
+              month — cancel anytime, keep access until the period ends.
             </p>
           )}
 
-          <div className="mt-6 flex flex-wrap gap-4">
+          <div className="mt-8 flex flex-wrap gap-4">
             {user.stripeCustomerId ? (
               <ManageBillingButton />
             ) : (
               <Link
                 href="/pricing"
-                className="rounded-xl bg-orange-500 px-6 py-3 text-sm font-semibold text-white hover:bg-orange-600"
+                className="rounded-xl bg-orange-500 px-6 py-3 text-sm font-semibold text-white transition hover:bg-orange-600"
               >
                 Upgrade to Premium
               </Link>
@@ -98,14 +132,14 @@ export default async function DashboardPage() {
             {!isPremium && user.stripeCustomerId ? (
               <Link
                 href="/pricing"
-                className="rounded-xl border border-neutral-700 bg-neutral-800 px-6 py-3 text-sm font-semibold text-white hover:border-orange-500"
+                className="rounded-xl border border-white/10 bg-white/5 px-6 py-3 text-sm font-semibold text-neutral-200 transition hover:border-orange-500/60 hover:text-white"
               >
                 View plans
               </Link>
             ) : null}
           </div>
-        </div>
-      </div>
+        </section>
+      </main>
     </div>
   );
 }

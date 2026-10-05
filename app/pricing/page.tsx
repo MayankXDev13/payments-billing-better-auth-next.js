@@ -1,5 +1,6 @@
 import { AuthGuard } from "@/components/AuthGuard";
 import { PricingCards } from "@/components/PricingCards";
+import { SiteHeader } from "@/components/SiteHeader";
 
 const pricingTiers = [
   {
@@ -36,23 +37,27 @@ const pricingTiers = [
 export default async function PricingPage() {
   return (
     <AuthGuard>
-      <div className="min-h-screen bg-neutral-950 px-6 py-20 text-white">
-        <div className="mx-auto max-w-6xl">
-          <div className="mb-16 text-center">
-            <span className="rounded-full border border-orange-500/30 bg-orange-500/10 px-4 py-1 text-sm font-medium text-orange-400">
-              Pricing
-            </span>
-
-            <h1 className="mt-6 text-5xl font-bold tracking-tight">
-              Simple, Transparent Pricing
+      <div className="min-h-screen bg-[#09090b] text-neutral-200">
+        <SiteHeader />
+        <div className="mx-auto max-w-6xl px-6 py-20">
+          <div className="rise mb-16 text-center">
+            <p className="font-mono text-xs tracking-[0.25em] text-orange-400/90">
+              PLANS
+            </p>
+            <h1 className="mx-auto mt-6 max-w-2xl font-display text-5xl leading-tight text-[#F5F1E8] md:text-6xl">
+              Two entries. <em className="text-orange-400">Pick one.</em>
             </h1>
-
-            <p className="mx-auto mt-5 max-w-2xl text-lg text-neutral-400">
-              Choose the perfect plan for your workflow. Upgrade anytime.
+            <p className="mx-auto mt-5 max-w-xl text-lg text-neutral-400">
+              Free forever, or Premium for the price of two coffees. Cancel
+              anytime from the dashboard.
             </p>
           </div>
 
           <PricingCards tiers={pricingTiers} />
+
+          <p className="mt-12 text-center font-mono text-xs tracking-widest text-neutral-600">
+            TEST MODE · NO REAL CHARGES · CANCEL ANYTIME
+          </p>
         </div>
       </div>
     </AuthGuard>

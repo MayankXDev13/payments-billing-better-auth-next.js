@@ -8,6 +8,7 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  --font-display: var(--font-display);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -118,5 +119,40 @@
   }
   body {
     @apply bg-background text-foreground;
+  }
+  ::selection {
+    background: oklch(0.7 0.19 47);
+    color: #09090b;
+  }
+  :focus-visible {
+    outline: 2px solid oklch(0.7 0.19 47);
+    outline-offset: 3px;
+  }
+}
+
+/* Ledger entrance: one quiet rise, staggered via inline animation-delay. */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.rise {
+  animation: rise 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rise {
+    animation: none;
+  }
+  *,
+  ::before,
+  ::after {
+    transition-duration: 0.01ms !important;
   }
 }

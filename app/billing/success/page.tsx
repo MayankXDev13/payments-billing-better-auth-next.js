@@ -1,3 +1,4 @@
+import { SiteHeader } from "@/components/SiteHeader";
 import { auth } from "@/lib/auth";
 import { getStripeClient } from "@/lib/stripe";
 import { headers } from "next/headers";
@@ -9,30 +10,62 @@ type Props = {
   searchParams: Promise<{ session_id?: string }>;
 };
 
-function Card({
+function Frame({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="min-h-screen bg-[#09090b] text-neutral-200">
+      <SiteHeader />
+      <main className="px-6 py-20">{children}</main>
+    </div>
+  );
+}
+
+/** A receipt, not a modal: perforation, mono reference, one serif verdict. */
+function Receipt({
+  stamp,
+  stampTone,
   title,
   body,
   hint,
 }: {
+  stamp: string;
+  stampTone: "paid" | "warn" | "muted";
   title: string;
   body: string;
   hint?: string;
 }) {
+  const tone =
+    stampTone === "paid"
+      ? "border-orange-500/60 text-orange-300"
+      : stampTone === "warn"
+        ? "border-yellow-500/50 text-yellow-200"
+        : "border-white/15 text-neutral-400";
   return (
-    <div className="mx-auto max-w-lg rounded-3xl border border-neutral-800 bg-neutral-900 p-10 text-center">
-      <h1 className="text-3xl font-bold text-white">{title}</h1>
-      <p className="mt-4 text-neutral-400">{body}</p>
-      {hint ? <p className="mt-2 text-sm text-neutral-500">{hint}</p> : null}
+    <div className="rise mx-auto max-w-md rounded-3xl border border-white/8 bg-[#131316] p-10 text-center">
+      <p
+        className={`inline-block -rotate-3 rounded-lg border-2 px-4 py-1 font-mono text-xs tracking-[0.25em] ${tone}`}
+      >
+        {stamp}
+      </p>
+      <h1 className="mt-6 font-display text-4xl italic text-[#F5F1E8]">
+        {title}
+      </h1>
+      <p className="mt-4 leading-relaxed text-neutral-400">{body}</p>
+      <div className="my-8 border-t border-dashed border-white/15" />
+      {hint ? (
+        <p className="font-mono text-xs leading-relaxed break-all text-neutral-600">
+          {hint}
+        </p>
+      ) : null}
       <div className="mt-8 flex justify-center gap-4">
         <Link
           href="/dashboard"
-          className="rounded-xl bg-orange-500 px-6 py-3 text-sm font-semibold text-white hover:bg-orange-600"
+          className="rounded-xl bg-orange-500 px-6 py-3 text-sm font-semibold text-white transition hover:bg-orange-600"
         >
           Go to dashboard
         </Link>
         <Link
           href="/pricing"
-          className="rounded-xl border border-neutral-700 bg-neutral-800 px-6 py-3 text-sm font-semibold text-white hover:border-orange-500"
+          className="rounded-xl border border-white/10 bg-white/5 px-6 py-3 text-sm font-semibold text-neutral-200 transition hover:border-orange-500/60 hover:text-white"
         >
           View plans
         </Link>
@@ -48,13 +81,15 @@ export default async function BillingSuccessPage({ searchParams }: Props) {
   const { session_id: sessionId } = await searchParams;
   if (!sessionId) {
     return (
-      <div className="min-h-screen bg-neutral-950 px-6 py-20">
-        <Card
+      <Frame>
+        <Receipt
           title="Missing checkout reference"
           body="We couldn't find a checkout session. If you just paid, your webhook confirmation may still be on its way."
-          hint="Check the dashboard — your plan updates automatically once payment confirms."
+          hint="CHECK THE DASHBOARD — YOUR PLAN UPDATES ONCE PAYMENT CONFIRMS"
+          stamp="NO REFERENCE"
+          stampTone="muted"
         />
-      </div>
+      </Frame>
     );
   }
 
@@ -66,13 +101,15 @@ export default async function BillingSuccessPage({ searchParams }: Props) {
   } catch (err) {
     console.error("Success page session lookup failed:", err);
     return (
-      <div className="min-h-screen bg-neutral-950 px-6 py-20">
-        <Card
+      <Frame>
+        <Receipt
           title="Couldn't verify payment"
           body="This checkout reference looks invalid or expired. If money left your account, contact support."
-          hint={`Reference: ${sessionId}`}
+          hint={`REF ${sessionId}`}
+          stamp="UNVERIFIED"
+          stampTone="muted"
         />
-      </div>
+      </Frame>
     );
   }
 
@@ -81,12 +118,14 @@ export default async function BillingSuccessPage({ searchParams }: Props) {
     checkout.client_reference_id ?? checkout.metadata?.userId ?? null;
   if (ownerId && ownerId !== session.user.id) {
     return (
-      <div className="min-h-screen bg-neutral-950 px-6 py-20">
-        <Card
-          title="Checkout belongs to another account"
+      <Frame>
+        <Receipt
+          title="Wrong account"
           body="You're signed in with a different account than the one that checked out. Sign in with the purchasing account to see your plan."
+          stamp="MISMATCH"
+          stampTone="warn"
         />
-      </div>
+      </Frame>
     );
   }
 
@@ -95,35 +134,41 @@ export default async function BillingSuccessPage({ searchParams }: Props) {
     checkout.payment_status === "no_payment_required"
   ) {
     return (
-      <div className="min-h-screen bg-neutral-950 px-6 py-20">
-        <Card
-          title="You're on Premium 🎉"
+      <Frame>
+        <Receipt
+          title="You're on Premium"
           body="Payment confirmed. Your subscription is active — if the dashboard doesn't show it yet, give it a few seconds and refresh."
-          hint={`Reference: ${checkout.id}`}
+          hint={`REF ${checkout.id}`}
+          stamp="PAID"
+          stampTone="paid"
         />
-      </div>
+      </Frame>
     );
   }
 
   if (checkout.status === "expired") {
     return (
-      <div className="min-h-screen bg-neutral-950 px-6 py-20">
-        <Card
+      <Frame>
+        <Receipt
           title="Checkout expired"
           body="This checkout session expired before payment completed. No charge was made — start a new checkout to subscribe."
+          stamp="EXPIRED"
+          stampTone="muted"
         />
-      </div>
+      </Frame>
     );
   }
 
   // Open / unpaid: payment may still be processing (e.g. async methods).
   return (
-    <div className="min-h-screen bg-neutral-950 px-6 py-20">
-      <Card
+    <Frame>
+      <Receipt
         title="Payment processing"
         body="Your payment hasn't confirmed yet. You'll get Premium automatically once it clears — no need to pay twice."
-        hint={`Status: ${checkout.payment_status}. Reference: ${checkout.id}`}
+        hint={`${checkout.payment_status.toUpperCase()} · REF ${checkout.id}`}
+        stamp="PENDING"
+        stampTone="warn"
       />
-    </div>
+    </Frame>
   );
 }

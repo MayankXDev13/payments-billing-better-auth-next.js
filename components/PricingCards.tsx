@@ -100,53 +100,52 @@ function Cards({ tiers }: PricingCardsProps) {
         </div>
       ) : null}
 
-      <div className="grid gap-8 md:grid-cols-2">
-        {tiers.map((tier) => (
+      <div className="mx-auto grid max-w-4xl gap-8 md:grid-cols-2">
+        {tiers.map((tier, i) => (
           <div
             key={tier.id}
-            className={`group relative overflow-hidden rounded-3xl border transition-all duration-300 hover:-translate-y-2 hover:shadow-[0_25px_80px_rgba(249,115,22,0.15)]
+            style={{ animationDelay: `${i * 120}ms` }}
+            className={`rise group relative overflow-hidden rounded-3xl border transition-all duration-300 hover:-translate-y-1.5
             ${
               tier.isPopular
-                ? "border-orange-500 bg-linear-to-b from-neutral-900 to-black"
-                : "border-neutral-800 bg-neutral-900"
+                ? "border-orange-500/70 bg-[#131316] shadow-[0_25px_80px_rgba(249,115,22,0.12)]"
+                : "border-white/8 bg-[#101013]"
             }`}
           >
-            {/* Orange Glow */}
-            <div className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-500 group-hover:opacity-100">
-              <div className="absolute left-1/2 top-0 h-52 w-52 -translate-x-1/2 rounded-full bg-orange-500/20 blur-3xl" />
-            </div>
-
             {/* Popular Badge */}
             {tier.isPopular && (
-              <div className="absolute right-5 top-5 z-20 flex items-center gap-1 rounded-full bg-orange-500 px-3 py-1 text-xs font-semibold text-white">
+              <div className="absolute right-5 top-5 z-20 flex items-center gap-1.5 rounded-full bg-orange-500 px-3 py-1 text-xs font-semibold text-white">
                 <Sparkles className="h-3.5 w-3.5" />
-                Most Popular
+                Most popular
               </div>
             )}
 
             <div className="relative z-10 p-8">
-              <h3 className="text-3xl font-bold text-white">{tier.name}</h3>
+              <p className="font-mono text-[11px] tracking-[0.25em] text-neutral-500">
+                {tier.isPopular ? "PAID · MONTHLY" : "FREE · FOREVER"}
+              </p>
+              <h3 className="mt-3 font-display text-4xl italic text-[#F5F1E8]">
+                {tier.name}
+              </h3>
 
-              <div className="mt-8 flex items-end">
-                <span className="text-6xl font-extrabold text-white">
+              <div className="mt-6 flex items-end gap-2">
+                <span className="font-mono text-6xl tabular-nums tracking-tight text-[#F5F1E8]">
                   ${tier.price}
                 </span>
-
-                <span className="mb-2 ml-2 text-neutral-400">
+                <span className="mb-2 font-mono text-sm text-neutral-500">
                   /{tier.interval}
                 </span>
               </div>
 
-              <div className="my-8 h-px bg-neutral-800" />
+              <div className="my-8 h-px bg-white/8" />
 
-              <ul className="space-y-5">
+              <ul className="space-y-4">
                 {tier.features.map((feature) => (
-                  <li key={feature} className="flex items-center gap-4">
-                    <div className="flex h-7 w-7 items-center justify-center rounded-full bg-orange-500/15">
-                      <Check className="h-4 w-4 text-orange-400" />
-                    </div>
-
-                    <span className="text-neutral-300">{feature}</span>
+                  <li key={feature} className="flex items-center gap-3">
+                    <Check className="h-4 w-4 shrink-0 text-orange-400" />
+                    <span className="text-[15px] text-neutral-300">
+                      {feature}
+                    </span>
                   </li>
                 ))}
               </ul>
@@ -154,14 +153,14 @@ function Cards({ tiers }: PricingCardsProps) {
               <button
                 onClick={() => handleSubscribe(tier)}
                 disabled={pendingId !== null}
-                className={`mt-10 w-full rounded-xl py-3 text-sm font-semibold transition-all duration-300 disabled:cursor-not-allowed disabled:opacity-60 ${
+                className={`mt-10 w-full rounded-xl py-3.5 text-sm font-semibold transition-all duration-300 disabled:cursor-not-allowed disabled:opacity-60 ${
                   tier.isPopular
                     ? "bg-orange-500 text-white hover:bg-orange-600"
-                    : "border border-neutral-700 bg-neutral-800 text-white hover:border-orange-500 hover:bg-neutral-950"
+                    : "border border-white/10 bg-white/5 text-neutral-200 hover:border-orange-500/60 hover:text-white"
                 }`}
               >
                 {tier.price === 0
-                  ? "Get Started"
+                  ? "Get started"
                   : pendingId === tier.id
                     ? "Redirecting…"
                     : "Subscribe"}
